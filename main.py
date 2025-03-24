@@ -1,6 +1,3 @@
-# 📘 ATA IELB IA – API com Flask + Notion (com paginação + blocos seguros)
-# ---------------------------------------------------------------
-
 from flask import Flask, request, jsonify
 from notion_client import Client
 import os
@@ -8,14 +5,14 @@ import time
 
 app = Flask(__name__)
 
-# 🔐 Variáveis de ambiente seguras no Render
+# 🔐 Variáveis seguras no Render
 notion_token = os.getenv("NOTION_TOKEN")
 database_id = os.getenv("DATABASE_ID")
 notion = Client(auth=notion_token)
 
 @app.route("/")
 def home():
-    return "✅ API IELB IA conectada ao Notion (com proteção e blocos seguros)"
+    return "✅ API IELB IA conectada ao Notion com segurança e blocos tratados!"
 
 @app.route("/buscar", methods=["POST"])
 def buscar():
@@ -50,19 +47,20 @@ def buscar():
 
                 match_corpo = False
                 trecho = ""
+
                 try:
                     blocks = notion.blocks.children.list(block_id=page_id)["results"]
                     texto_completo = ""
                     for block in blocks:
-                        if block.get("type") and block[block["type"]].get("rich_text"):
-                            for rt in block[block["type"]]["rich_text"]:
+                        tipo = block.get("type")
+                        if tipo and block.get(tipo, {}).get("rich_text"):
+                            for rt in block[tipo]["rich_text"]:
                                 texto_completo += rt["text"].get("content", "") + " "
-
                     if termo in texto_completo.lower():
                         match_corpo = True
                         trecho = extrair_trecho(texto_completo, termo)
                 except Exception as e:
-                    print(f"Erro ao processar blocos da página {page_id}: {e}")
+                    print(f"[BLOCOS] Erro na página {page_id} — {e}")
 
                 if match_campo or match_corpo:
                     resultados.append({
@@ -70,7 +68,7 @@ def buscar():
                         "ano": ano,
                         "quem": quem,
                         "reuniao": reuniao_texto,
-                        "trecho": trecho or "Trecho encontrado nos campos",
+                        "trecho": trecho or "Trecho nos campos da tabela",
                         "link": link_txt
                     })
 
@@ -79,15 +77,15 @@ def buscar():
             next_cursor = query.get("next_cursor")
 
             if time.time() - start_time > 25:
-                break  # Proteção contra timeout do Render
+                break  # Proteção contra timeout no Render
 
     except Exception as e:
+        print("Erro interno:", e)
         return jsonify({"erro": str(e)}), 500
 
     return jsonify(resultados)
 
-# 🔍 Trecho encontrado com contexto
-
+# 🔎 Destacar trecho encontrado
 def extrair_trecho(texto, termo, contexto=150):
     pos = texto.lower().find(termo)
     if pos == -1:
@@ -96,5 +94,5 @@ def extrair_trecho(texto, termo, contexto=150):
     fim = min(len(texto), pos + len(termo) + contexto)
     return texto[inicio:fim].strip()
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080)

@@ -1,78 +1,92 @@
-# 📘 ATA IELB IA – API com Flask + Notion (campos da tabela + corpo das páginas)
+# 📘 ATA IELB IA – API com Flask + Notion (com paginação e timeout seguro)
 # ---------------------------------------------------------------
 
 from flask import Flask, request, jsonify
 from notion_client import Client
 import os
+import time
 
 app = Flask(__name__)
 
-# 🔐 Variáveis seguras no ambiente do Render
+# 🔐 Variáveis seguras (no ambiente do Render)
 notion_token = os.getenv("NOTION_TOKEN")
 database_id = os.getenv("DATABASE_ID")
 notion = Client(auth=notion_token)
 
 @app.route("/")
 def home():
-    return "✅ API IELB IA conectada ao Notion (campos e conteúdo)!"
+    return "✅ API IELB IA conectada ao Notion com paginação!"
 
 @app.route("/buscar", methods=["POST"])
 def buscar():
     data = request.get_json()
     termo = data.get("termo", "").lower()
     resultados = []
+    start_time = time.time()
 
     try:
-        response = notion.databases.query(database_id=database_id)
-        for page in response["results"]:
-            page_id = page["id"]
-            props = page["properties"]
+        next_cursor = None
+        while True:
+            query = notion.databases.query(
+                database_id=database_id,
+                start_cursor=next_cursor if next_cursor else None
+            )
 
-            titulo = props.get("Título da Ata", {}).get("title", [])
-            quem = props.get("Quem", {}).get("select", {}).get("name", "")
-            ano = props.get("Ano", {}).get("date", {}).get("start", "")
-            reuniao = props.get("Reunião", {}).get("rich_text", [])
-            link_txt = props.get("Link do .txt", {}).get("url", "")
+            for page in query["results"]:
+                page_id = page["id"]
+                props = page["properties"]
 
-            titulo_texto = titulo[0]["text"]["content"] if titulo else ""
-            reuniao_texto = reuniao[0]["text"]["content"] if reuniao else ""
+                titulo = props.get("Título da Ata", {}).get("title", [])
+                quem = props.get("Quem", {}).get("select", {}).get("name", "")
+                ano = props.get("Ano", {}).get("date", {}).get("start", "")
+                reuniao = props.get("Reunião", {}).get("rich_text", [])
+                link_txt = props.get("Link do .txt", {}).get("url", "")
 
-            # Verificar se o termo aparece nos campos
-            campos = [titulo_texto, quem, ano, reuniao_texto, link_txt]
-            match_campo = any(termo in (str(c) or '').lower() for c in campos)
+                titulo_texto = titulo[0]["text"]["content"] if titulo else ""
+                reuniao_texto = reuniao[0]["text"]["content"] if reuniao else ""
 
-            # Verificar se aparece no corpo do texto
-            match_corpo = False
-            trecho = ""
-            try:
-                blocks = notion.blocks.children.list(page_id=page_id)["results"]
-                texto_completo = " ".join(
-                    block["paragraph"]["rich_text"][0]["text"]["content"]
-                    for block in blocks
-                    if block["type"] == "paragraph" and block["paragraph"]["rich_text"]
-                )
-                if termo in texto_completo.lower():
-                    match_corpo = True
-                    trecho = extrair_trecho(texto_completo, termo)
-            except:
-                pass
+                campos = [titulo_texto, quem, ano, reuniao_texto, link_txt]
+                match_campo = any(termo in (str(c) or '').lower() for c in campos)
 
-            if match_campo or match_corpo:
-                resultados.append({
-                    "ata": titulo_texto,
-                    "ano": ano,
-                    "quem": quem,
-                    "reuniao": reuniao_texto,
-                    "trecho": trecho or "Trecho nos campos da tabela",
-                    "link": link_txt
-                })
+                match_corpo = False
+                trecho = ""
+
+                try:
+                    blocks = notion.blocks.children.list(block_id=page_id)["results"]
+                    texto_completo = " ".join(
+                        block["paragraph"]["rich_text"][0]["text"]["content"]
+                        for block in blocks
+                        if block["type"] == "paragraph" and block["paragraph"]["rich_text"]
+                    )
+                    if termo in texto_completo.lower():
+                        match_corpo = True
+                        trecho = extrair_trecho(texto_completo, termo)
+                except Exception as e:
+                    print(f"Erro ao ler blocos da página {page_id}: {e}")
+
+                if match_campo or match_corpo:
+                    resultados.append({
+                        "ata": titulo_texto,
+                        "ano": ano,
+                        "quem": quem,
+                        "reuniao": reuniao_texto,
+                        "trecho": trecho or "Trecho nos campos da tabela",
+                        "link": link_txt
+                    })
+
+            if not query.get("has_more"):
+                break
+            next_cursor = query.get("next_cursor")
+
+            if time.time() - start_time > 25:
+                break  # Proteção contra timeout do Render (30s máx)
 
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
 
     return jsonify(resultados)
 
-# 🔍 Destacar o trecho do texto
+# 🔍 Trecho encontrado
 
 def extrair_trecho(texto, termo, contexto=150):
     pos = texto.lower().find(termo)

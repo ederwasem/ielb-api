@@ -99,4 +99,4 @@ def extrair_trecho(texto, termo, contexto=150):
     return texto[inicio:fim].strip()
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=8080)
+    app.run(host="0.0.0.0", port=8080) 
